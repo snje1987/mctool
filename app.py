@@ -484,6 +484,7 @@ class McWorld: #{{{
     #}}}
 
     def move_data(self, region, file_name, args, ret): #{{{
+        print(file_name)
         src_path = os.path.join(self.path, file_name)
         dst = args['dst']
         dst_path = os.path.join(dst, file_name)
@@ -523,8 +524,6 @@ class McWorld: #{{{
             file_region = McWorld.match_file(coord, region)
             if file_region == False:
                 continue
-            print(file_name)
-
             ret = call(file_region, file_name, args, ret)
         return ret
     #}}}
@@ -747,7 +746,7 @@ class App: # {{{
         world = McWorld(config['src'])
         count = world.walk(region, world.calc_block, args)
         print('方块总数: %d' % (count['sum']))
-        for name in count['calc']:
+        for name in config['calc']:
             print('%s: %d' % (name, count['calc'][name]))
     # }}}
 
