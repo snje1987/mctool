@@ -125,6 +125,13 @@ class Region: # {{{
 
 class McChunk: # {{{
 
+    @staticmethod
+    def count(blist, bid, cache): # {{{
+        if not bid in cache:
+            cache[bid] = blist.count(bid)
+        return cache[bid]
+    # }}}
+
     def __init(self): # {{{
         self.coord = None
         self.index = -1
@@ -154,7 +161,6 @@ class McChunk: # {{{
         self.data = data
     # }}}
 
-
     def pack_data(self): # {{{
         data_len = len(self.data)
         return struct.pack('>i', data_len) + self.data
@@ -181,27 +187,27 @@ class McChunk: # {{{
             print('区块数据错误')
             sys.exit()
 
-        ret = {}
-        ret['sum'] = 0
-        exclude = args['exclude']
-
         calc = {}
         if 'calc' in args:
             calc = args['calc']
 
-        ret['calc'] = {}
+        ret = {}
         for name in calc:
-            ret['calc'][name] = 0
+            ret[name] = 0
 
         sections = nbtfile['Level']['Sections']
         for section in sections:
-            ncount = 0
-            for bid in exclude:
-                ncount += section['Blocks'].count(bid)
-            ret['sum'] += 4096 - ncount
+            cache = {}
+
             for name in calc:
-                for bid in calc[name]:
-                    ret['calc'][name] += section['Blocks'].count(bid)
+                if 'include' in calc[name]:
+                    for bid in calc[name]['include']:
+                        ret[name] += McChunk.count(section['Blocks'], bid, cache)
+                elif 'exclude' in calc[name]:
+                    ncount = 0
+                    for bid in calc[name]['exclude']:
+                        ncount += McChunk.count(section['Blocks'], bid, cache)
+                    ret[name] += 4096 - ncount
         return ret
     # }}}
 
@@ -399,12 +405,11 @@ class McRegion: #{{{
         count = chunk.calc_block(region, args)
         if ret == None:
             return count
-        count['sum'] += ret['sum']
-        for item in ret['calc']:
-            if item in count['calc']:
-                count['calc'][item] += ret['calc'][item]
+        for item in ret:
+            if item in count:
+                count[item] += ret[item]
             else:
-                count['calc'][item] = ret['calc'][item]
+                count[item] = ret[item]
         return count
     #}}}
 
@@ -503,12 +508,11 @@ class McWorld: #{{{
         count = x.walk(region, x.calc_block, args)
         if ret == None:
             return count
-        count['sum'] += ret['sum']
-        for item in ret['calc']:
-            if item in count['calc']:
-                count['calc'][item] += ret['calc'][item]
+        for item in ret:
+            if item in count:
+                count[item] += ret[item]
             else:
-                count['calc'][item] = ret['calc'][item]
+                count[item] = ret[item]
         return count
     #}}}
 
@@ -731,23 +735,36 @@ class App: # {{{
 
         region = Region()
         args = {}
-        args['exclude'] = {0}
         if 'keep' in config:
             region.add_keep(region = config['keep'])
         if 'remove' in config:
             region.add_remove(region = config['remove'])
         if 'exclude' in config:
             args['exclude'] = args['exclude'].union(set(config['exclude']))
-        if 'calc' in config:
-            args['calc'] = config['calc']
-            for name in args['calc']:
-                args['calc'][name] = set(args['calc'][name])
+        if not 'calc' in config:
+            print('配置文件错误')
+            return
+
+        args['calc'] = {}
+        for item in config['calc']:
+            if 'include' in item:
+                args['calc'][item['name']] = {}
+                args['calc'][item['name']]['include'] = set(item['include'])
+            elif 'exclude' in item:
+                args['calc'][item['name']] = {}
+                args['calc'][item['name']]['exclude'] = set(item['exclude'])
+
+        if len(args['calc']) <= 0:
+            print('配置文件错误')
+            return
+
 
         world = McWorld(config['src'])
         count = world.walk(region, world.calc_block, args)
-        print('方块总数: %d' % (count['sum']))
-        for name in config['calc']:
-            print('%s: %d' % (name, count['calc'][name]))
+
+        for item in config['calc']:
+            if item['name'] in count:
+                print('%s: %s' % (item['name'], format(count[item['name']], ',')))
     # }}}
 
     def run(self): # {{{
