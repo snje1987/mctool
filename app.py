@@ -6,6 +6,15 @@ from nbt import nbt
 class Region: # {{{
 
     @staticmethod
+    def intersection(left, right): # {{{
+        l = max(left[0], right[0])
+        r = min(left[1], right[1])
+        if l <= r:
+            return [l, r]
+        return False
+    # }}}
+
+    @staticmethod
     def match_range(left, right): # {{{
         if len(left) < 2:
             return 0
@@ -190,6 +199,9 @@ class McChunk: # {{{
         calc = {}
         if 'calc' in args:
             calc = args['calc']
+        y = [0, 255]
+        if 'y' in args:
+            y = args['y']
 
         ret = {}
         for name in calc:
@@ -197,17 +209,26 @@ class McChunk: # {{{
 
         sections = nbtfile['Level']['Sections']
         for section in sections:
-            cache = {}
+            cy = section['Y'].value
+            cy_range = [cy * 16, cy * 16 + 15]
+            cy_range = Region.intersection(y, cy_range)
+            if cy_range == False:
+                continue
+            cy_range = [cy_range[0] - cy * 16, cy_range[1] + 1 - cy * 16]
 
+            blocks = section['Blocks']
+            blocks = section['Blocks'][cy_range[0] * 256:cy_range[1] * 256]
+            block_sum = (cy_range[1] - cy_range[0]) * 256
+            cache = {}
             for name in calc:
                 if 'include' in calc[name]:
                     for bid in calc[name]['include']:
-                        ret[name] += McChunk.count(section['Blocks'], bid, cache)
+                        ret[name] += McChunk.count(blocks, bid, cache)
                 elif 'exclude' in calc[name]:
                     ncount = 0
                     for bid in calc[name]['exclude']:
-                        ncount += McChunk.count(section['Blocks'], bid, cache)
-                    ret[name] += 4096 - ncount
+                        ncount += McChunk.count(blocks, bid, cache)
+                    ret[name] += block_sum - ncount
         return ret
     # }}}
 
@@ -745,6 +766,11 @@ class App: # {{{
             print('配置文件错误')
             return
 
+        if 'y' in config:
+            y = Region.format_range(config['y'])
+            if y[0] >= 0 or y[1] <= 255:
+                args['y'] = y
+
         args['calc'] = {}
         for item in config['calc']:
             if 'include' in item:
@@ -762,19 +788,31 @@ class App: # {{{
         world = McWorld(config['src'])
         count = world.walk(region, world.calc_block, args)
 
+        len1 = 0
+        len2 = 0
         for item in config['calc']:
             if item['name'] in count:
-                print('%s: %s' % (item['name'], format(count[item['name']], ',')))
+                name = item['name']
+                count[name] = format(count[name], ',')
+                if len(name) > len1:
+                    len1 = len(name)
+                if len(count[name]) > len2:
+                    len2 = len(count[name])
+
+        format_str = '%%-%ds\t%%%ds' % (len1, len2)
+        for item in config['calc']:
+            if item['name'] in count:
+                print(format_str % (item['name'], count[item['name']]))
     # }}}
 
     def run(self): # {{{
         if self.cmd == 'nbt':
             return self.do_nbt()
-        elif self.cmd == 'list_chunks':
+        elif self.cmd == 'list':
             return self.do_list_chunks()
         elif self.cmd == 'clear':
             return self.do_clear()
-        elif self.cmd == 'calc_block':
+        elif self.cmd == 'calc':
             return self.do_calc_block()
         else:
             print('指令不存在')
