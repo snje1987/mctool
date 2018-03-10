@@ -3,80 +3,65 @@
 import struct, time, os, zlib, io, shutil, sys, getopt, gzip, json, copy
 from nbt import nbt
 
-class Region: # {{{
-
-    @staticmethod
-    def intersection(left, right): # {{{
-        l = max(left[0], right[0])
-        r = min(left[1], right[1])
-        if l <= r:
-            return [l, r]
-        return False
-    # }}}
+class RegionList: # {{{
 
     @staticmethod
     def match_range(left, right): # {{{
         if len(left) < 2:
-            return 0
-        if len(right) < 2:
-            return 1
-        if left[0] <= right[0] and left[1] >= right[1]:
-            return 0
-        if left[1] < right[0] or left[0] > right[1]:
-            return 2
-        return 1
+            return right
+        l = max(left[0], right[0])
+        r = min(left[1], right[1])
+        if l <= r:
+            return [l, r]
+        return None
     # }}}
 
     @staticmethod
-    def contain(region_list, target): # {{{
-        new_list = []
-        for region in region_list:
-            x = Region.match_range(region['x'], target['x'])
-            z = Region.match_range(region['z'], target['z'])
-            if x == 0 and z == 0:
-                return (0, [region])
-            if x == 2 or z == 2:
-                continue
-            new_list.append(region)
-        if len(new_list) > 0:
-            return (1, new_list)
-        return (2, None)
+    def match_region(region, to_match): # {{{
+        x = RegionList.match_range(region['x'], to_match['x'])
+        z = RegionList.match_range(region['z'], to_match['z'])
+        if x == None or z == None:
+            return None
+        ret = {}
+        ret['type'] = region['type']
+        ret['x'] = x
+        ret['z'] = z
+        return ret
     # }}}
 
     @staticmethod
-    def format_range(data): # {{{
+    def format_range(data, div = False): # {{{
+        ret = []
         if len(data) == 0:
-            return []
-        if len(data) == 1:
-            return [data[0], data[0]]
-        if data[0] > data[1]:
-            return [data[1], data[0]]
-        return [data[0],data[1]]
+            ret = []
+        elif len(data) == 1:
+            ret = [data[0], data[0]]
+        elif data[0] > data[1]:
+            ret = [data[1], data[0]]
+        else:
+            ret = [data[0], data[1]]
+        if div != False:
+            ret[0] = ret[0] // div
+            ret[1] = ret[1] // div
+        return ret
     # }}}
 
-    @staticmethod
-    def add_region(region_list, region): # {{{
+    def add_region(self, region, div = False): # {{{
         tmp = {}
+        tmp['type'] = region['type']
         if 'x' in region:
-            tmp['x'] = Region.format_range(region['x'])
+            tmp['x'] = RegionList.format_range(region['x'], div)
         else:
             tmp['x'] = []
-        if 'y' in region:
-            tmp['y'] = Region.format_range(region['y'])
-        else:
-            tmp['y'] = []
         if 'z' in region:
-            tmp['z'] = Region.format_range(region['z'])
+            tmp['z'] = RegionList.format_range(region['z'], div)
         else:
             tmp['z'] = []
-        region_list.append(tmp)
+        self.area.append(tmp)
     # }}}
 
-    def __init__(self, keep = [], remove = []): # {{{
-        self.keep = []
-        self.remove = []
-        self.add_keep(region = keep)
-        self.add_remove(region = remove)
+    def __init__(self): # {{{
+        self.area = []
     # }}}
 
     def __repr__(self): # {{{
@@ -84,50 +69,41 @@ class Region: # {{{
     # }}}
 
     def __str__(self): # {{{
-        return "Region:{\n\tkeep:" + self.keep.__str__() + "\n\tremove:" + self.remove.__str__() + "\n}"
+        return "Region:{\n\tarea:" + self.area.__str__() + "\n}"
     # }}}
 
-    def add_keep(self, rect = None, region = None): # {{{
-        if region != None:
-            for rect in region:
-                Region.add_region(self.keep, rect)
-        elif rect != None:
-            Region.add_region(self.keep, rect)
+    def add(self, region = None, region_list = None, div = False): # {{{
+        if region_list != None:
+            for region in region_list:
+                self.add_region(region, div)
+        elif region != None:
+            self.add_region(region, div)
     # }}}
 
-    def add_remove(self, rect = None, region = None): # {{{
-        if region != None:
-            for rect in region:
-                Region.add_region(self.remove, rect)
-        elif rect != None:
-            Region.add_region(self.remove, rect)
+    def match(self, to_match): # {{{
+        ret_list = []
+        for region in self.area:
+            item = RegionList.match_region(region, to_match)
+            if item != None:
+                ret_list.append(item)
+        if len(ret_list) <= 0:
+            return None
+        region_list = RegionList()
+        region_list.add(region_list = ret_list)
+        return region_list
     # }}}
 
-    def match(self, region): # {{{
-        if not self.keep and not self.remove:
-            return True
-        if self.remove:
-            if self.keep:
-                keep,keep_region = Region.contain(self.keep, region)
-            else:
-                keep = 2
-            if keep == 0:
-                return True
-            remove,remove_region = Region.contain(self.remove, region)
-            if remove == 2:
-                return True
-            if keep == 1:
-                return Region(keep_region, remove_region)
-            if remove == 0:
-                return False
-            return Region([], remove_region)
-
-        keep,keep_region = Region.contain(self.keep, region)
-        if keep == 0:
-            return True
-        if keep == 2:
-            return False
-        return Region(keep_region, [])
+    def apply(self, base, chunks): # {{{
+        for region in self.area:
+            x_range = [region['x'][0] - base[0], region['x'][1] - base[0]]
+            z_range = [region['z'][0] - base[0], region['z'][1] - base[0]]
+            rtype = region['type']
+            for x in range(x_range[0], x_range[1] + 1):
+                for z in range(z_range[0], z_range[1] + 1):
+                    if rtype == 'include':
+                        chunks[x + z * 32] = 1
+                    else:
+                        chunks[x + z * 32] = 0
     # }}}
 
 # }}}
@@ -190,7 +166,7 @@ class McChunk: # {{{
             print('区块数据错误')
     # }}}
 
-    def calc_block(self, region, args): # {{{
+    def calc_block(self, args): # {{{
         nbtfile = McRegion.decode_nbt(self.data[1:], 'zlib')
         if nbtfile == None:
             print('区块数据错误')
@@ -211,8 +187,8 @@ class McChunk: # {{{
         for section in sections:
             cy = section['Y'].value
             cy_range = [cy * 16, cy * 16 + 15]
-            cy_range = Region.intersection(y, cy_range)
-            if cy_range == False:
+            cy_range = RegionList.match_range(y, cy_range)
+            if cy_range == None:
                 continue
             cy_range = [cy_range[0] - cy * 16, cy_range[1] + 1 - cy * 16]
 
@@ -304,16 +280,6 @@ class McRegion: #{{{
         return nbtfile
     # }}}
 
-    @staticmethod
-    def match_chunk(base, index, region): # {{{
-        x = index % 32
-        z = index //32
-        chunk_region = {}
-        chunk_region['x'] = [base[0] + x * 16, base[0] + x * 16 + 15]
-        chunk_region['z'] = [base[1] + z * 16, base[0] + z * 16 + 15]
-        return region.match(chunk_region)
-    # }}}
-
     def __init__(self, path, isnew = False): #{{{
         self.path = path
 
@@ -324,7 +290,7 @@ class McRegion: #{{{
         tmp = filename.split('.');
         if len(tmp) != 4 or tmp[3] != 'mca':
             raise Exception('')
-        self.base = [int(tmp[1]) * 512, int(tmp[2]) * 512]
+        self.base = [int(tmp[1]) * 32, int(tmp[2]) * 32]
 
         if not isnew:
             self.fh = open(self.path, 'rb+')
@@ -415,15 +381,15 @@ class McRegion: #{{{
 
     #}}}
 
-    def move_file(self, region, index, args, ret): #{{{
+    def move_file(self, index, args, ret): #{{{
         new_file = args['dst_file']
         chunk = self.get_chunk(index = index)
         new_file.add_chunk(chunk)
     #}}}
 
-    def calc_block(self, region, index, args, ret): #{{{
+    def calc_block(self, index, args, ret): #{{{
         chunk = self.get_chunk(index = index)
-        count = chunk.calc_block(region, args)
+        count = chunk.calc_block(args)
         if ret == None:
             return count
         for item in ret:
@@ -434,20 +400,18 @@ class McRegion: #{{{
         return count
     #}}}
 
-    def walk(self, region, call, args): #{{{
+    def walk(self, region_list, call, args): #{{{
         ret = None
-        if region == False:
-            return ret
+
+        chunks = [0] * 1024
+        region_list.apply(self.base, chunks)
+
         for i in range(0, 1024):
             if self.offsets[i][0] == 0 and self.times[i] == 0:
                 continue
-            if region == True:
-                chunk_region = True
-            else:
-                chunk_region = McRegion.match_chunk(self.base, i, region)
-                if chunk_region == False:
-                    continue
-            ret = call(chunk_region, i, args, ret)
+            if chunks[i] == 0:
+                continue
+            ret = call(i, args, ret)
         return ret
     #}}}
 
@@ -488,11 +452,11 @@ class McWorld: #{{{
     # }}}
 
     @staticmethod
-    def match_file(coord, region): # {{{
+    def get_file_region(coord): # {{{
         file_region = {}
-        file_region['x'] = [coord[0] * 512, coord[0] * 512 + 511]
-        file_region['z'] = [coord[1] * 512, coord[1] * 512 + 511]
-        return region.match(file_region)
+        file_region['x'] = [coord[0] * 32, coord[0] * 32 + 31]
+        file_region['z'] = [coord[1] * 32, coord[1] * 32 + 31]
+        return file_region
     # }}}
 
     def __init__(self, path): #{{{
@@ -509,7 +473,7 @@ class McWorld: #{{{
         return x.get_chunk(coord = coord)
     #}}}
 
-    def move_data(self, region, file_name, args, ret): #{{{
+    def move_data(self, region_list, file_name, args, ret): #{{{
         print(file_name)
         src_path = os.path.join(self.path, file_name)
         dst = args['dst']
@@ -518,15 +482,15 @@ class McWorld: #{{{
         x = McRegion(src_path)
         new_file = McRegion(dst_path, True)
 
-        x.walk(region, x.move_file, {'dst_file': new_file})
+        x.walk(region_list, x.move_file, {'dst_file': new_file})
         new_file.write()
     #}}}
 
-    def calc_block(self, region, file_name, args, ret): #{{{
+    def calc_block(self, region_list, file_name, args, ret): #{{{
         src_path = os.path.join(self.path, file_name)
 
         x = McRegion(src_path)
-        count = x.walk(region, x.calc_block, args)
+        count = x.walk(region_list, x.calc_block, args)
         if ret == None:
             return count
         for item in ret:
@@ -537,19 +501,20 @@ class McWorld: #{{{
         return count
     #}}}
 
-    def walk(self, region, call, args): #{{{
+    def walk(self, region_list, call, args): #{{{
         ret = None
         files = os.listdir(self.path)
         for file_name in files:
             tmp = file_name.split('.');
             if len(tmp) != 4 or tmp[3] != 'mca':
                 continue
-
             coord = [int(i) for i in tmp[1:3]]
-            file_region = McWorld.match_file(coord, region)
-            if file_region == False:
+            file_region = McWorld.get_file_region(coord)
+
+            file_region_list = region_list.match(file_region)
+            if file_region_list == None:
                 continue
-            ret = call(file_region, file_name, args, ret)
+            ret = call(file_region_list, file_name, args, ret)
         return ret
     #}}}
 
@@ -724,24 +689,22 @@ class App: # {{{
             print('配置文件错误')
             return
 
-        region = Region()
+        if not 'area' in config or len(config['area']) <= 0:
+            print('配置文件错误')
+            return
 
-        if 'keep' in config:
-            region.add_keep(region = config['keep'])
-        if 'remove' in config:
-            region.add_remove(region = config['remove'])
+        region_list = RegionList()
+        region_list.add(region_list = config['area'], div = 16)
 
         dst = config['dst']
         if os.path.exists(dst) and not os.path.isdir(dst):
             print('路径不是目录')
             return
-        if os.path.exists(dst):
-            shutil.rmtree(dst)
-        time.sleep(1)
-        os.makedirs(dst)
+        if not os.path.exists(dst):
+            os.makedirs(dst)
 
         world = McWorld(config['src'])
-        world.walk(region, world.move_data, {'dst': config['dst']})
+        world.walk(region_list, world.move_data, {'dst': config['dst']})
     # }}}
 
     def do_calc_block(self): # {{{
@@ -754,20 +717,20 @@ class App: # {{{
             print('配置文件错误')
             return
 
-        region = Region()
+        if not 'area' in config or len(config['area']) <= 0:
+            print('配置文件错误')
+            returl
+
+        region_list = RegionList()
+        region_list.add(region_list = config['area'], div = 16)
+
         args = {}
-        if 'keep' in config:
-            region.add_keep(region = config['keep'])
-        if 'remove' in config:
-            region.add_remove(region = config['remove'])
-        if 'exclude' in config:
-            args['exclude'] = args['exclude'].union(set(config['exclude']))
         if not 'calc' in config:
             print('配置文件错误')
             return
 
         if 'y' in config:
-            y = Region.format_range(config['y'])
+            y = RegionList.format_range(config['y'])
             if y[0] >= 0 or y[1] <= 255:
                 args['y'] = y
 
@@ -786,7 +749,7 @@ class App: # {{{
 
 
         world = McWorld(config['src'])
-        count = world.walk(region, world.calc_block, args)
+        count = world.walk(region_list, world.calc_block, args)
 
         len1 = 0
         len2 = 0
