@@ -752,20 +752,17 @@ class App: # {{{
         count = world.walk(region_list, world.calc_block, args)
 
         len1 = 0
-        len2 = 0
         for item in config['calc']:
             if item['name'] in count:
                 name = item['name']
                 count[name] = format(count[name], ',')
-                if len(name) > len1:
-                    len1 = len(name)
-                if len(count[name]) > len2:
-                    len2 = len(count[name])
+                if len(count[name]) > len1:
+                    len1 = len(count[name])
 
-        format_str = '%%-%ds\t%%%ds' % (len1, len2)
+        format_str = '%%%ds %%s' % (len1)
         for item in config['calc']:
             if item['name'] in count:
-                print(format_str % (item['name'], count[item['name']]))
+                print(format_str % (count[item['name']], item['name']))
     # }}}
 
     def run(self): # {{{
